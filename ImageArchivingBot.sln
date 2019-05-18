@@ -3,7 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.28307.438
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ImageArchivingBot", "ImageArchivingBot\ImageArchivingBot.csproj", "{0E45D94F-6492-4A5B-B760-9786732B1C71}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ImageArchivingBot", "ImageArchivingBot\ImageArchivingBot.csproj", "{0E45D94F-6492-4A5B-B760-9786732B1C71}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ImageArchiverApi", "ImageArchiverApi\ImageArchiverApi.csproj", "{1E8CB929-B360-4245-A8C9-0ADCF10B8D14}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -15,6 +17,10 @@ Global
 		{0E45D94F-6492-4A5B-B760-9786732B1C71}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{0E45D94F-6492-4A5B-B760-9786732B1C71}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{0E45D94F-6492-4A5B-B760-9786732B1C71}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1E8CB929-B360-4245-A8C9-0ADCF10B8D14}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1E8CB929-B360-4245-A8C9-0ADCF10B8D14}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1E8CB929-B360-4245-A8C9-0ADCF10B8D14}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1E8CB929-B360-4245-A8C9-0ADCF10B8D14}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
