@@ -28,8 +28,8 @@ namespace ImageArchivingBot.Migrations
                 name: "Images",
                 columns: table => new
                 {
-                    Id = table.Column<ulong>(nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
+                    IdChecksumConcat = table.Column<string>(nullable: false),
+                    Id = table.Column<ulong>(nullable: false),
                     Timestamp = table.Column<long>(nullable: false),
                     SenderId = table.Column<ulong>(nullable: false),
                     SenderUsername = table.Column<string>(nullable: false),
@@ -49,7 +49,7 @@ namespace ImageArchivingBot.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_Images", x => x.Id);
+                    table.PrimaryKey("PK_Images", x => x.IdChecksumConcat);
                 });
 
             migrationBuilder.CreateTable(

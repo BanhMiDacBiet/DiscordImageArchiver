@@ -75,6 +75,8 @@ namespace ImageArchivingBot
             return Task.CompletedTask;
         }
 
+        // TODO: Add event handler for message edits (EditHelper?)
+
         private async Task ReadMessage(MessageCreateEventArgs e)
         {
             Trace.WriteLine("Message received.");

@@ -14,6 +14,9 @@ namespace ImageArchivingBot
 {
     public class DbUpdater
     {
+        // TODO: Move the database helper into its own dedicated thread (like CommandHelper) so it doesn't block while updating
+        // Note: might have concurrency problems with SQLite locking on writes
+
         private DiscordClient discordClient;
 
         public DbUpdater(DiscordClient dClient)

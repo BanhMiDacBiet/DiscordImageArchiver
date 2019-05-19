@@ -7,6 +7,9 @@ namespace ImageArchivingBot.Models
 {
     public class Image : Media
     {
+        [Key]
+        public string IdChecksumConcat { get; set; }
+
         [Required]
         public int ImageWidth { get; set; }
         [Required]

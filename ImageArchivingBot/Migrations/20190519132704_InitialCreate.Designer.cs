@@ -3,14 +3,16 @@ using System;
 using ImageArchivingBot;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace ImageArchivingBot.Migrations
 {
     [DbContext(typeof(DiscordDbContext))]
-    partial class DiscordContextModelSnapshot : ModelSnapshot
+    [Migration("20190519132704_InitialCreate")]
+    partial class InitialCreate
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -42,7 +44,7 @@ namespace ImageArchivingBot.Migrations
 
             modelBuilder.Entity("ImageArchivingBot.Models.Image", b =>
                 {
-                    b.Property<ulong>("Id")
+                    b.Property<string>("IdChecksumConcat")
                         .ValueGeneratedOnAdd();
 
                     b.Property<ulong>("ChannelId");
@@ -61,6 +63,8 @@ namespace ImageArchivingBot.Migrations
                         .IsRequired();
 
                     b.Property<int>("FileSize");
+
+                    b.Property<ulong>("Id");
 
                     b.Property<int>("ImageHeight");
 
@@ -85,7 +89,7 @@ namespace ImageArchivingBot.Migrations
                     b.Property<string>("Url")
                         .IsRequired();
 
-                    b.HasKey("Id");
+                    b.HasKey("IdChecksumConcat");
 
                     b.ToTable("Images");
                 });
