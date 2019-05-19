@@ -676,7 +676,7 @@ namespace ImageArchivingBot
                                       $"Roles: {string.Join(", ", GetRoleNames(botMember))}" +
                                       $"\n" +
                                       $"**Channel Information:**\n" +
-                                      $"*Visible Channels:\n* {string.Join("\n", visibleChannels)}",
+                                      $"*Visible Channels:*\n {string.Join("\n", visibleChannels)}",
                         Author = new DiscordEmbedBuilder.EmbedAuthor(),
                         Color = DiscordColor.CornflowerBlue,
                         Timestamp = DateTimeOffset.UtcNow
