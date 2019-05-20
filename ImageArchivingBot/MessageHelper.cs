@@ -11,6 +11,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Security.Cryptography;
 using DSharpPlus;
+using System.Threading;
 
 namespace ImageArchivingBot
 {
@@ -40,10 +41,20 @@ namespace ImageArchivingBot
 
         private List<HelperMessage> DownloadMessageList = new List<HelperMessage>();
         private List<HelperMessage> CommandMessageList = new List<HelperMessage>();
+
+        private List<HelperMessage> HistoryMessageList = new List<HelperMessage>();
+        private List<DiscordChannel> HistoryChannelList = new List<DiscordChannel>();
+
         private bool DownloadHelperRunning = false;
         private Task DownloadHelperTask;
         private bool CommandHelperRunning = false;
         private Task CommandHelperTask;
+        private bool HistoryHelperRunning = false;
+        private Task HistoryHelperTask;
+        private bool HistoryDownloadHelperRunning = false;
+        private Task HistoryDownloadHelperTask;
+
+        private CancellationToken HistoryCancellationToken;
 
 #pragma warning disable CS1998 // Async method lacks 'await' operators and will run synchronously
         public async Task<bool> IngestMessage(MessageCreateEventArgs e, Program progRef)
@@ -141,8 +152,8 @@ namespace ImageArchivingBot
             {
                 Trace.WriteLine($"{CommandMessageList.Count} message(s) in command queue.");
                 HelperMessage currentMessage = CommandMessageList.First();
-                await ProcessCommand(currentMessage);
                 CommandMessageList.RemoveAt(0);
+                await ProcessCommand(currentMessage);
             } while (CommandMessageList.Count > 0);
             Trace.WriteLine("Command helper exited.");
             CommandHelperRunning = false;
@@ -567,13 +578,13 @@ namespace ImageArchivingBot
                         "`ia!adm.usr.deluid:[user ID]`:\n" +
                         "Deletes the user from the database and clears all of their saved images. Will *not* opt-out (all future images will still be processed).\n" +
                          "\n" +
-                         "`ia!adm.usr.optoutuid:[user ID]`\n" +
+                         "`ia!adm.usr.optoutuid:[user ID]`:\n" +
                          "Forcibly opts out the specified user. Will not clear their saved images.\n" +
                         "\n" +
-                        "`ia!adm.usr.optinuid:[user ID]`\n" +
+                        "`ia!adm.usr.optinuid:[user ID]`:\n" +
                         "Forcibly opts in the specified user.\n" +
                         "\n" +
-                        "`ia!adm.usr.optstatus:[user ID]`\n" +
+                        "`ia!adm.usr.optstatus:[user ID]`:\n" +
                         "Checks opt-out status for the specified user.",
                         Color = DiscordColor.CornflowerBlue,
                         Author = new DiscordEmbedBuilder.EmbedAuthor(),
@@ -633,12 +644,207 @@ namespace ImageArchivingBot
                 {
                     await message.discordMessage.RespondAsync($"Pong. Socket latency: {discordClient.Ping}ms");
                 }
+                else if (message.discordMessage.Content.ToLower().StartsWith("ia!bot.chn.info:"))
+                {
+                    ulong.TryParse(message.discordMessage.Content.Substring(16), out ulong channelId);
+                    DiscordChannel discordChannel = await TryParseDiscordChannelId(channelId, message);
+
+                    DiscordDbContext discordDbContext = new DiscordDbContext();
+
+                    DiscordEmbedBuilder dEmbedBuilder = new DiscordEmbedBuilder
+                    {
+                        Title = "Channel Info",
+                        Description = $"Channel Name: {discordChannel.Name}\n" +
+                                      $"Channel Topic: {discordChannel.Topic}\n" +
+                                      $"Channel Type: {discordChannel.Type}\n" +
+                                      $"Parent Guild: {discordChannel.Guild.Name}\n" +
+                                      $"\n" +
+                                      $"**Database Info**:\n" +
+                                      $"Saved Images: {discordDbContext.Images.Where(i => i.ChannelId == discordChannel.Id).Count()}",
+                        Author = new DiscordEmbedBuilder.EmbedAuthor(),
+                        Color = DiscordColor.CornflowerBlue,
+                        Timestamp = DateTimeOffset.UtcNow
+                    };
+                    dEmbedBuilder.Author.Name = message.discordMessage.Author.Username + "#" + message.discordMessage.Author.Discriminator;
+                    dEmbedBuilder.Author.IconUrl = message.discordMessage.Author.AvatarUrl;
+                    await message.discordMessage.RespondAsync("", false, dEmbedBuilder.Build());
+                }
+                else if (message.discordMessage.Content.ToLower().StartsWith("ia!bot.hst.scrape:"))
+                {
+                    ulong.TryParse(message.discordMessage.Content.Substring(18), out ulong channelId);
+                    DiscordChannel channel = await TryParseDiscordChannelId(channelId, message);
+
+                    List<DiscordChannel> visibleChannels = await GetVisibleChannels(channel.Guild);
+                    if (!visibleChannels.Contains(channel))
+                    {
+                        DiscordEmbedBuilder dEmbedBuilder = new DiscordEmbedBuilder
+                        {
+                            Title = "Image Archiver Bot",
+                            Description = $"Error: Channel #{channel.Name} is not visible to the bot.",
+                            Author = new DiscordEmbedBuilder.EmbedAuthor(),
+                            Color = DiscordColor.Red,
+                            Timestamp = DateTimeOffset.UtcNow
+                        };
+                        dEmbedBuilder.Author.Name = message.discordMessage.Author.Username + "#" + message.discordMessage.Author.Discriminator;
+                        dEmbedBuilder.Author.IconUrl = message.discordMessage.Author.AvatarUrl;
+                        await message.discordMessage.RespondAsync("", false, dEmbedBuilder.Build());
+                    }
+                    else if (channel.Type != ChannelType.Text)
+                    {
+                        DiscordEmbedBuilder dEmbedBuilder = new DiscordEmbedBuilder
+                        {
+                            Title = "Image Archiver Bot",
+                            Description = $"Error: Channel #{channel.Name} is not a text channel.",
+                            Author = new DiscordEmbedBuilder.EmbedAuthor(),
+                            Color = DiscordColor.Red,
+                            Timestamp = DateTimeOffset.UtcNow
+                        };
+                        dEmbedBuilder.Author.Name = message.discordMessage.Author.Username + "#" + message.discordMessage.Author.Discriminator;
+                        dEmbedBuilder.Author.IconUrl = message.discordMessage.Author.AvatarUrl;
+                        await message.discordMessage.RespondAsync("", false, dEmbedBuilder.Build());
+                    }
+                    else
+                    {
+                        HistoryChannelList.Add(channel);
+
+                        DiscordEmbedBuilder dEmbedBuilder = new DiscordEmbedBuilder
+                        {
+                            Title = "Channel History Scraper Queue",
+                            Description = $"Added channel #{channel.Name} to queue. Use `ia!bot.hst.scraper.info` for status.",
+                            Author = new DiscordEmbedBuilder.EmbedAuthor(),
+                            Color = DiscordColor.Green,
+                            Timestamp = DateTimeOffset.UtcNow
+                        };
+                        dEmbedBuilder.Author.Name = message.discordMessage.Author.Username + "#" + message.discordMessage.Author.Discriminator;
+                        dEmbedBuilder.Author.IconUrl = message.discordMessage.Author.AvatarUrl;
+                        await message.discordMessage.RespondAsync("", false, dEmbedBuilder.Build());
+                    }
+
+                    if (HistoryHelperRunning == false || HistoryHelperTask.IsCompleted == true)
+                    {
+                        Trace.WriteLine("Getting new cancellation token.");
+                        HistoryCancellationToken = new CancellationToken();
+                        Trace.WriteLine("Starting history helper thread...");
+#pragma warning disable CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
+                        HistoryHelperRunning = true;
+                        HistoryHelperTask = Task.Run(() => HistoryHelper(message.discordMessage));
+#pragma warning restore CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
+                    }
+                }
+                else if (message.discordMessage.Content.ToLower() == "ia!bot.hst.scraper.clear")
+                {
+                    Trace.WriteLine("Clearing history scraper channel list.");
+                    HistoryChannelList.Clear();
+                    DiscordEmbedBuilder dEmbedBuilder = new DiscordEmbedBuilder
+                    {
+                        Title = "Channel History Scraper Queue",
+                        Description = $"Cleared the channel scrape queue.",
+                        Author = new DiscordEmbedBuilder.EmbedAuthor(),
+                        Color = DiscordColor.Green,
+                        Timestamp = DateTimeOffset.UtcNow
+                    };
+                }
+                else if (message.discordMessage.Content.ToLower() == "ia!bot.hst.scraper.info")
+                {
+                    List<string> activeScrapers = new List<string>();
+                    string scraperSuccess;
+                    bool scraperStatus = false;
+
+                    activeScrapers.Add("**[ID]: Channel Name (Guild Name)**");
+                    for (int i = 0; i < HistoryChannelList.Count; i++)
+                    {
+                        activeScrapers.Add($"[{i}]: {HistoryChannelList[i].Name} ({HistoryChannelList[i].Guild.Name})");
+                    }
+                    if (activeScrapers.Count == 1)
+                    {
+                        activeScrapers.Add("No channels in queue.");
+                    }
+
+                    if (HistoryHelperTask != null)
+                    {
+                        scraperStatus = !HistoryHelperTask.IsCompleted;
+                        scraperSuccess = HistoryHelperTask.IsCompletedSuccessfully.ToString();
+                    }
+                    else
+                    {
+                        scraperSuccess = "No history scraper has run yet.";
+                    }
+
+                    DiscordEmbedBuilder dEmbedBuilder = new DiscordEmbedBuilder
+                    {
+                        Title = "Channel History Scraper Queue",
+                        Description = $"{string.Join("\n", activeScrapers)}\n" +
+                                      $"Currently scraping: {scraperStatus}\n" +
+                                      $"Scraper exited successfully: {scraperSuccess}",
+                        Author = new DiscordEmbedBuilder.EmbedAuthor(),
+                        Color = DiscordColor.CornflowerBlue,
+                        Timestamp = DateTimeOffset.UtcNow
+                    };
+                    dEmbedBuilder.Author.Name = message.discordMessage.Author.Username + "#" + message.discordMessage.Author.Discriminator;
+                    dEmbedBuilder.Author.IconUrl = message.discordMessage.Author.AvatarUrl;
+                    await message.discordMessage.RespondAsync("", false, dEmbedBuilder.Build());
+                }
+                else if (message.discordMessage.Content.ToLower() == "ia!bot.hst.scraper.stop")
+                {
+                    if (HistoryHelperTask != null)
+                    {
+                        CancellationTokenSource cts = new CancellationTokenSource();
+                        HistoryCancellationToken = cts.Token;
+                        cts.Cancel();
+
+                        DiscordEmbedBuilder dEmbedBuilder = new DiscordEmbedBuilder
+                        {
+                            Title = "Channel History Scraper Queue",
+                            Description = $"Sent cancellation token to history scraper.",
+                            Author = new DiscordEmbedBuilder.EmbedAuthor(),
+                            Color = DiscordColor.CornflowerBlue,
+                            Timestamp = DateTimeOffset.UtcNow
+                        };
+                        dEmbedBuilder.Author.Name = message.discordMessage.Author.Username + "#" + message.discordMessage.Author.Discriminator;
+                        dEmbedBuilder.Author.IconUrl = message.discordMessage.Author.AvatarUrl;
+                        await message.discordMessage.RespondAsync("", false, dEmbedBuilder.Build());
+
+                        await Task.Run(async () =>
+                        {
+                            while (HistoryHelperTask.IsCompleted != true) { await Task.Delay(100); }
+                            return;
+                        });
+
+                        cts.Dispose();
+
+                        dEmbedBuilder = new DiscordEmbedBuilder
+                        {
+                            Title = "Channel History Scraper Queue",
+                            Description = $"History scraper stopped. The queue may not be empty.",
+                            Author = new DiscordEmbedBuilder.EmbedAuthor(),
+                            Color = DiscordColor.Green,
+                            Timestamp = DateTimeOffset.UtcNow
+                        };
+                        dEmbedBuilder.Author.Name = message.discordMessage.Author.Username + "#" + message.discordMessage.Author.Discriminator;
+                        dEmbedBuilder.Author.IconUrl = message.discordMessage.Author.AvatarUrl;
+                        await message.discordMessage.RespondAsync("", false, dEmbedBuilder.Build());
+                    }
+                    else
+                    {
+                        DiscordEmbedBuilder dEmbedBuilder = new DiscordEmbedBuilder
+                        {
+                            Title = "Channel History Scraper Queue",
+                            Description = $"No history scraper is running.",
+                            Author = new DiscordEmbedBuilder.EmbedAuthor(),
+                            Color = DiscordColor.Red,
+                            Timestamp = DateTimeOffset.UtcNow
+                        };
+                        dEmbedBuilder.Author.Name = message.discordMessage.Author.Username + "#" + message.discordMessage.Author.Discriminator;
+                        dEmbedBuilder.Author.IconUrl = message.discordMessage.Author.AvatarUrl;
+                        await message.discordMessage.RespondAsync("", false, dEmbedBuilder.Build());
+                    }
+                }
                 else if (message.discordMessage.Content.ToLower() == "ia!bot.listguilds")
                 {
                     // Send an embed with the list of guilds and names. Get further details on a guild with a different command.
-                    DiscordGuild[] GuildArray = discordClient.Guilds.Values.ToArray();
+                    IEnumerable<DiscordGuild> guilds = discordClient.Guilds.Values;
                     List<string> guildNamesIds = new List<string>();
-                    foreach (DiscordGuild guild in GuildArray)
+                    foreach (DiscordGuild guild in guilds)
                     {
                         guildNamesIds.Add($"{guild.Name} ({guild.Id})");
                     }
@@ -693,7 +899,7 @@ namespace ImageArchivingBot
                         {
                             Title = "Download Queue Status",
                             Description = $"Current items waiting in download queue: {DownloadMessageList.Count}\n" +
-                                          $"Download helper running: {DownloadHelperTask.IsCompleted}\n" +
+                                          $"Download helper running: {!DownloadHelperTask.IsCompleted}\n" +
                                           $"Download helper successfully completed: {DownloadHelperTask.IsCompletedSuccessfully}",
                             Author = new DiscordEmbedBuilder.EmbedAuthor(),
                             Color = DiscordColor.CornflowerBlue,
@@ -782,6 +988,21 @@ namespace ImageArchivingBot
                         Description = "`ia!bot.ping`:\n" +
                                       "Gets the socket latency of the bot.\n" +
                                       "\n" +
+                                      "`ia!bot.chn.info:[channel ID]`:\n" +
+                                      "Gets information for the specified channel.\n" +
+                                      "\n" +
+                                      "`ia!bot.hst.scrape:[channel ID]`:\n" +
+                                      "Scrapes all messages previously sent in the specified channel. May take a long time.\n" +
+                                      "\n" +
+                                      "`ia!bot.hst.scraper.info`:\n" +
+                                      "Checks the status of the historical message scraper.\n" +
+                                      "\n" +
+                                      "`ia!bot.hst.scraper.stop`:\n" +
+                                      "Tries to stop the historical message scraper.\n" +
+                                      "\n" +
+                                      "`ia!bot.hst.scraper.clear`:\n" +
+                                      "Clears the channel history scrape list.\n" +
+                                      "\n" +
                                       "`ia!bot.listguilds`:\n" +
                                       "Gets a list of guilds the bot is in.\n" +
                                       "\n" +
@@ -795,7 +1016,7 @@ namespace ImageArchivingBot
                                       "Clears the bot's download queue.\n" +
                                       "\n" +
                                       "`ia!bot.dqueue.process`:\n" +
-                                      "Spawns a new download queue helper if one doesn't exist.\n",
+                                      "Spawns a new download queue helper if one doesn't exist.",
                         Color = DiscordColor.CornflowerBlue,
                         Author = new DiscordEmbedBuilder.EmbedAuthor(),
                         Timestamp = DateTimeOffset.UtcNow
@@ -849,7 +1070,7 @@ namespace ImageArchivingBot
             {
                 return true;
             }
-            DiscordRole[] discordRoles = discordMember.Roles.ToArray();
+            IEnumerable<DiscordRole> discordRoles = discordMember.Roles;
             foreach (DiscordRole role in discordRoles)
             {
                 if (role.Permissions.HasPermission(Permissions.Administrator))
@@ -866,7 +1087,26 @@ namespace ImageArchivingBot
             DiscordUser discordUser = null;
             if (discordId != 0)
             {
-                discordUser = await discordClient.GetUserAsync(discordId);
+                try
+                {
+                    discordUser = await discordClient.GetUserAsync(discordId);
+                    return discordUser;
+                }
+                catch
+                {
+                    DiscordEmbedBuilder dEmbedBuilder = new DiscordEmbedBuilder
+                    {
+                        Title = "Image Archiver Bot",
+                        Description = $"Error: Could not get user object from ID, please check the ID is valid and try again.",
+                        Author = new DiscordEmbedBuilder.EmbedAuthor(),
+                        Color = DiscordColor.Red,
+                        Timestamp = DateTimeOffset.UtcNow
+                    };
+                    dEmbedBuilder.Author.Name = message.discordMessage.Author.Username + "#" + message.discordMessage.Author.Discriminator;
+                    dEmbedBuilder.Author.IconUrl = message.discordMessage.Author.AvatarUrl;
+                    await message.discordMessage.RespondAsync("", false, dEmbedBuilder.Build());
+                    return null;
+                }
             }
             else
             {
@@ -874,25 +1114,6 @@ namespace ImageArchivingBot
                 {
                     Title = "Image Archiver Bot",
                     Description = $"Error: Could not parse user ID as ulong, please check the ID is valid and try again.",
-                    Author = new DiscordEmbedBuilder.EmbedAuthor(),
-                    Color = DiscordColor.Red,
-                    Timestamp = DateTimeOffset.UtcNow
-                };
-                dEmbedBuilder.Author.Name = message.discordMessage.Author.Username + "#" + message.discordMessage.Author.Discriminator;
-                dEmbedBuilder.Author.IconUrl = message.discordMessage.Author.AvatarUrl;
-                await message.discordMessage.RespondAsync("", false, dEmbedBuilder.Build());
-                return null;
-            }
-            if (discordUser.Id != 0)
-            {
-                return discordUser;
-            }
-            else
-            {
-                DiscordEmbedBuilder dEmbedBuilder = new DiscordEmbedBuilder
-                {
-                    Title = "Image Archiver Bot",
-                    Description = $"Error: Could not get user object from ID, please check the ID is valid and try again.",
                     Author = new DiscordEmbedBuilder.EmbedAuthor(),
                     Color = DiscordColor.Red,
                     Timestamp = DateTimeOffset.UtcNow
@@ -910,14 +1131,34 @@ namespace ImageArchivingBot
             DiscordGuild discordGuild = null;
             if (discordId != 0)
             {
-                discordGuild = await discordClient.GetGuildAsync(discordId);
+                try
+                {
+                    discordGuild = await discordClient.GetGuildAsync(discordId);
+                    return discordGuild;
+
+                }
+                catch
+                {
+                    DiscordEmbedBuilder dEmbedBuilder = new DiscordEmbedBuilder
+                    {
+                        Title = "Image Archiver Bot",
+                        Description = $"Error: Could not get guild object from ID, please check the ID is valid and try again.",
+                        Author = new DiscordEmbedBuilder.EmbedAuthor(),
+                        Color = DiscordColor.Red,
+                        Timestamp = DateTimeOffset.UtcNow
+                    };
+                    dEmbedBuilder.Author.Name = message.discordMessage.Author.Username + "#" + message.discordMessage.Author.Discriminator;
+                    dEmbedBuilder.Author.IconUrl = message.discordMessage.Author.AvatarUrl;
+                    await message.discordMessage.RespondAsync("", false, dEmbedBuilder.Build());
+                    return null;
+                }
             }
             else
             {
                 DiscordEmbedBuilder dEmbedBuilder = new DiscordEmbedBuilder
                 {
                     Title = "Image Archiver Bot",
-                    Description = $"Error: Could not parse user ID as ulong, please check the ID is valid and try again.",
+                    Description = $"Error: Could not parse guild ID as ulong, please check the ID is valid and try again.",
                     Author = new DiscordEmbedBuilder.EmbedAuthor(),
                     Color = DiscordColor.Red,
                     Timestamp = DateTimeOffset.UtcNow
@@ -926,16 +1167,41 @@ namespace ImageArchivingBot
                 dEmbedBuilder.Author.IconUrl = message.discordMessage.Author.AvatarUrl;
                 await message.discordMessage.RespondAsync("", false, dEmbedBuilder.Build()); return null;
             }
-            if (discordGuild.Id != 0)
+        }
+
+        private async Task<DiscordChannel> TryParseDiscordChannelId(ulong discordId, HelperMessage message)
+        {
+            // Try to parse a Discord guild from a given ulong.
+            DiscordChannel discordChannel = null;
+            if (discordId != 0)
             {
-                return discordGuild;
+                try
+                {
+                    discordChannel = await discordClient.GetChannelAsync(discordId);
+                    return discordChannel;
+                }
+                catch
+                {
+                    DiscordEmbedBuilder dEmbedBuilder = new DiscordEmbedBuilder
+                    {
+                        Title = "Image Archiver Bot",
+                        Description = $"Error: Could not get channel object from ID, please check the ID is valid and try again.",
+                        Author = new DiscordEmbedBuilder.EmbedAuthor(),
+                        Color = DiscordColor.Red,
+                        Timestamp = DateTimeOffset.UtcNow
+                    };
+                    dEmbedBuilder.Author.Name = message.discordMessage.Author.Username + "#" + message.discordMessage.Author.Discriminator;
+                    dEmbedBuilder.Author.IconUrl = message.discordMessage.Author.AvatarUrl;
+                    await message.discordMessage.RespondAsync("", false, dEmbedBuilder.Build());
+                    return null;
+                }
             }
             else
             {
                 DiscordEmbedBuilder dEmbedBuilder = new DiscordEmbedBuilder
                 {
                     Title = "Image Archiver Bot",
-                    Description = $"Error: Could not get user object from ID, please check the ID is valid and try again.",
+                    Description = $"Error: Could not parse channel ID as ulong, please check the ID is valid and try again.",
                     Author = new DiscordEmbedBuilder.EmbedAuthor(),
                     Color = DiscordColor.Red,
                     Timestamp = DateTimeOffset.UtcNow
@@ -949,8 +1215,7 @@ namespace ImageArchivingBot
         private async Task<List<DiscordChannel>> GetVisibleChannels(DiscordGuild guild)
         {
             List<DiscordChannel> visibleChannels = new List<DiscordChannel>();
-            IReadOnlyList<DiscordChannel> channelsList = await guild.GetChannelsAsync();
-            DiscordChannel[] channels = channelsList.ToArray();
+            IReadOnlyList<DiscordChannel> channels = await guild.GetChannelsAsync();
             foreach (DiscordChannel channel in channels)
             {
                 if (channel.Guild.CurrentMember.PermissionsIn(channel).HasPermission(Permissions.AccessChannels))
@@ -964,7 +1229,7 @@ namespace ImageArchivingBot
         private List<string> GetRoleNames(DiscordMember member)
         {
             List<string> roleNames = new List<string>();
-            DiscordRole[] roles = member.Roles.ToArray();
+            IEnumerable<DiscordRole> roles = member.Roles;
             foreach (DiscordRole role in roles)
             {
                 roleNames.Add(role.Name);
@@ -990,7 +1255,7 @@ namespace ImageArchivingBot
 
         private async Task<bool> DownloadAttachments(HelperMessage message)
         {
-            DiscordAttachment[] discordAttachments = message.discordMessage.Attachments.ToArray();
+            IReadOnlyList<DiscordAttachment> discordAttachments = message.discordMessage.Attachments;
             foreach (DiscordAttachment attachment in discordAttachments)
             {
                 Trace.WriteLine("Checking if attachment is image.");
@@ -1083,18 +1348,140 @@ namespace ImageArchivingBot
             image.MessageContent = message.discordMessage.Content;
             image.Timestamp = message.discordMessage.Timestamp.ToUnixTimeSeconds();
 
-            discordDbContext.Add(image);
-            try
+            // Should only match if scraping historical messages.
+            if (discordDbContext.Images.Where(i => i.IdChecksumConcat == image.IdChecksumConcat).FirstOrDefault() == null)
             {
-                await discordDbContext.SaveChangesAsync();
-                Trace.WriteLine("Image metadata saved in database.");
+                discordDbContext.Add(image);
+
+                try
+                {
+                    await discordDbContext.SaveChangesAsync();
+                    Trace.WriteLine("Image metadata saved in database.");
+                }
+                catch (Exception e)
+                {
+                    discordClient.DebugLogger.LogMessage(LogLevel.Error, "Download Helper", $"Exception occured: {e.GetType()}: {e.Message}", DateTime.Now);
+                    return false;
+                }
+                return true;
             }
-            catch (Exception e)
+            else
             {
-                discordClient.DebugLogger.LogMessage(LogLevel.Error, "Download Helper", $"Exception occured: {e.GetType()}: {e.Message}", DateTime.Now);
+                Trace.WriteLine("Duplicate entry exists in database.");
                 return false;
             }
-            return true;
+        }
+
+
+        // Start of history section.
+        // Given a channel, get the most recent 100 messages, loop through them to check attachments, and send the relevant ones to a separate List<HelperMessage>
+        // with its own DownloadHelper(). After that, get the 100 messages before the first one in the recent 100 and repeat until there aren't any left.
+
+        private async Task HistoryHelper(DiscordMessage message)
+        {
+            Trace.WriteLine("History helper started.");
+            do
+            {
+                if (HistoryCancellationToken.IsCancellationRequested != false)
+                {
+                    Trace.WriteLine("Helper cancellation request received.");
+                    HistoryHelperRunning = false;
+                    return;
+                }
+                Trace.WriteLine($"{HistoryChannelList.Count} channel(s) in download queue.");
+                DiscordChannel discordChannel = HistoryChannelList.First();
+                await GetHistoricalMessages(discordChannel);
+                HistoryChannelList.RemoveAt(0);
+            } while (HistoryChannelList.Count > 0);
+            Trace.WriteLine("History helper exited.");
+            HistoryHelperRunning = false;
+        }
+
+        private async Task GetHistoricalMessages(DiscordChannel channel)
+        {
+            // First 100 messages
+            IReadOnlyList<DiscordMessage> messages = await channel.GetMessagesAsync(100, channel.LastMessageId);
+
+            while (messages.Count > 0)
+            {
+                foreach (DiscordMessage message in messages)
+                {
+                    if (HistoryCancellationToken.IsCancellationRequested != false)
+                    {
+                        Trace.WriteLine("Helper cancellation request received.");
+                        return;
+                    }
+                    await CheckHistoricalMessage(message);
+                }
+                Trace.WriteLine("Getting more historical messages.");
+                messages = await channel.GetMessagesAsync(100, messages.Last().Id);
+            }
+        }
+
+#pragma warning disable CS1998 // Async method lacks 'await' operators and will run synchronously
+        private async Task CheckHistoricalMessage(DiscordMessage message)
+#pragma warning restore CS1998 // Async method lacks 'await' operators and will run synchronously
+        {
+            if (HistoryCancellationToken.IsCancellationRequested != false)
+            {
+                Trace.WriteLine("Helper cancellation request received.");
+                return;
+            }
+            DiscordDbContext discordDbContext = new DiscordDbContext();
+            if (message.Attachments.Count != 0)
+            {
+                bool optOut;
+                try
+                {
+                    optOut = discordDbContext.Users.Where(u => u.IdGuildConcat == message.Author.Id.ToString() + message.Channel.GuildId.ToString()).SingleOrDefault().OptOut;
+                }
+                catch (NullReferenceException)
+                {
+                    optOut = true;
+                    Trace.WriteLine("Warning: User not in database sent attachment.");
+                }
+
+                if (optOut != false)
+                {
+                    Trace.WriteLine("Cancelled processing attachments due to user opt-out.");
+                    return;
+                }
+                Trace.WriteLine("Message has attachments.");
+                HelperMessage helperMessage = new HelperMessage
+                {
+                    discordMessage = message,
+                };
+                HistoryMessageList.Add(helperMessage);
+
+                if (HistoryDownloadHelperRunning == false || HistoryDownloadHelperTask.IsCompleted == true)
+                {
+                    // Runs download tasks on background thread.
+                    Trace.WriteLine("Starting history download helper thread...");
+#pragma warning disable CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
+                    HistoryDownloadHelperRunning = true;
+                    HistoryDownloadHelperTask = Task.Run(HistoryDownloadHelper);
+#pragma warning restore CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
+                }
+            }
+        }
+
+        private async Task HistoryDownloadHelper()
+        {
+            Trace.WriteLine("History download helper started.");
+            do
+            {
+                if (HistoryCancellationToken.IsCancellationRequested != false)
+                {
+                    Trace.WriteLine("Helper cancellation request received.");
+                    return;
+                }
+                Trace.WriteLine($"{HistoryMessageList.Count} message(s) in download queue.");
+                HelperMessage currentMessage = HistoryMessageList.First();
+                await DownloadAttachments(currentMessage);
+                HistoryMessageList.RemoveAt(0);
+            } while (HistoryMessageList.Count > 0);
+            Trace.WriteLine("History download helper exited.");
+            HistoryDownloadHelperRunning = false;
         }
     }
 }
