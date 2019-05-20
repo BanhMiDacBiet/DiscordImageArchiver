@@ -718,17 +718,17 @@ namespace ImageArchivingBot
                         dEmbedBuilder.Author.Name = message.discordMessage.Author.Username + "#" + message.discordMessage.Author.Discriminator;
                         dEmbedBuilder.Author.IconUrl = message.discordMessage.Author.AvatarUrl;
                         await message.discordMessage.RespondAsync("", false, dEmbedBuilder.Build());
-                    }
 
-                    if (HistoryHelperRunning == false || HistoryHelperTask.IsCompleted == true)
-                    {
-                        Trace.WriteLine("Getting new cancellation token.");
-                        HistoryCancellationToken = new CancellationToken();
-                        Trace.WriteLine("Starting history helper thread...");
+                        if (HistoryHelperRunning == false || HistoryHelperTask.IsCompleted == true)
+                        {
+                            Trace.WriteLine("Getting new cancellation token.");
+                            HistoryCancellationToken = new CancellationToken();
+                            Trace.WriteLine("Starting history helper thread...");
 #pragma warning disable CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
-                        HistoryHelperRunning = true;
-                        HistoryHelperTask = Task.Run(() => HistoryHelper(message.discordMessage));
+                            HistoryHelperRunning = true;
+                            HistoryHelperTask = Task.Run(() => HistoryHelper(message.discordMessage));
 #pragma warning restore CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
+                        }
                     }
                 }
                 else if (message.discordMessage.Content.ToLower() == "ia!bot.hst.scraper.clear")
@@ -1412,6 +1412,19 @@ namespace ImageArchivingBot
                 HistoryChannelList.RemoveAt(0);
             } while (HistoryChannelList.Count > 0);
             Trace.WriteLine("History helper exited.");
+
+            DiscordEmbedBuilder dEmbedBuilder = new DiscordEmbedBuilder
+            {
+                Title = "Channel History Scraper Queue",
+                Description = $"Finished processing messages. Downloads may still be pending.",
+                Author = new DiscordEmbedBuilder.EmbedAuthor(),
+                Color = DiscordColor.CornflowerBlue,
+                Timestamp = DateTimeOffset.UtcNow
+            };
+            dEmbedBuilder.Author.Name = message.Author.Username + "#" + message.Author.Discriminator;
+            dEmbedBuilder.Author.IconUrl = message.Author.AvatarUrl;
+            await message.RespondAsync("", false, dEmbedBuilder.Build());
+
             HistoryHelperRunning = false;
         }
 
