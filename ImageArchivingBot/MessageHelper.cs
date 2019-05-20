@@ -750,10 +750,13 @@ namespace ImageArchivingBot
                     string scraperSuccess;
                     bool scraperStatus = false;
 
+                    string scraperDownloadSuccess;
+                    bool scraperDownloading = false;
+
                     activeScrapers.Add("**[ID]: Channel Name (Guild Name)**");
                     for (int i = 0; i < HistoryChannelList.Count; i++)
                     {
-                        activeScrapers.Add($"[{i}]: {HistoryChannelList[i].Name} ({HistoryChannelList[i].Guild.Name})");
+                        activeScrapers.Add($"[{i}]: {HistoryChannelList[i].Name} ({HistoryChannelList[i].Guild.Name})\n");
                     }
                     if (activeScrapers.Count == 1)
                     {
@@ -770,12 +773,27 @@ namespace ImageArchivingBot
                         scraperSuccess = "No history scraper has run yet.";
                     }
 
+                    if (HistoryDownloadHelperTask != null)
+                    {
+                        scraperDownloading = !HistoryDownloadHelperTask.IsCompleted;
+                        scraperDownloadSuccess = HistoryDownloadHelperTask.IsCompletedSuccessfully.ToString();
+                    }
+                    else
+                    {
+                        scraperDownloadSuccess = "No history scraper download has run yet.";
+                    }
+
                     DiscordEmbedBuilder dEmbedBuilder = new DiscordEmbedBuilder
                     {
                         Title = "Channel History Scraper Queue",
                         Description = $"{string.Join("\n", activeScrapers)}\n" +
                                       $"Currently scraping: {scraperStatus}\n" +
-                                      $"Scraper exited successfully: {scraperSuccess}",
+                                      $"Scraper exited successfully: {scraperSuccess}\n" +
+                                      $"\n" +
+                                      $"**Download Queue Status:**\n" +
+                                      $"Current items waiting in download queue: {HistoryMessageList.Count}\n" +
+                                      $"Download helper running: {scraperDownloading}\n" +
+                                      $"Download helper successfully completed: {scraperDownloadSuccess}",
                         Author = new DiscordEmbedBuilder.EmbedAuthor(),
                         Color = DiscordColor.CornflowerBlue,
                         Timestamp = DateTimeOffset.UtcNow
