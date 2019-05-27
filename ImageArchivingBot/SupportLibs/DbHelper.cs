@@ -10,7 +10,7 @@ using DSharpPlus.Entities;
 using ImageArchivingBot.Models;
 using Microsoft.EntityFrameworkCore;
 
-namespace ImageArchivingBot
+namespace ImageArchivingBot.SupportLibs
 {
     public class DbUpdater
     {
