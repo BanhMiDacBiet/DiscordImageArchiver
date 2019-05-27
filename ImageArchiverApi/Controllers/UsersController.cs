@@ -19,7 +19,7 @@ namespace ImageArchiverApi.Controllers
 
         // GET api/users/5
         [HttpGet("{id}")]
-        public ActionResult<string> Get(int id)
+        public ActionResult<string> Get(ulong id)
         {
             return "value";
         }
